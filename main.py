@@ -6,6 +6,7 @@ Simple orchestration script that runs the complete workflow.
 import argparse
 import os
 from pathlib import Path
+import pandas as pd
 
 # Import pipeline modules
 from download import download_all_data
@@ -55,14 +56,14 @@ def main():
     parser.add_argument(
         '--train-start',
         type=str,
-        default='1957-03',
+        default='2015-01',
         help='Training start date (YYYY-MM)'
     )
 
     parser.add_argument(
         '--train-end',
         type=str,
-        default='1974-12',
+        default='2020-12',
         help='Initial training end date (YYYY-MM)'
     )
 
@@ -78,6 +79,20 @@ def main():
         type=int,
         default=10,
         help='Number of portfolio quantiles'
+    )
+
+    parser.add_argument(
+        '--validation-months',
+        type=int,
+        default=12,
+        help='Number of months for validation period'
+    )
+
+    parser.add_argument(
+        '--test-buffer-months',
+        type=int,
+        default=12,
+        help='Number of additional months to keep after train_end for testing'
     )
 
     args = parser.parse_args()
@@ -101,9 +116,20 @@ def main():
     merged_path = os.path.join(args.data_dir, 'merged_data.csv')
     if not args.skip_merge:
         print("\n[STEP 2/5] Merging datasets...")
+        # Filter to date range needed for training + validation + testing
+        # Add buffer before training start (for initial window)
+        filter_start = pd.to_datetime(args.train_start) - pd.DateOffset(months=12)
+        # Add buffer after training end (validation + test)
+        total_buffer = args.validation_months + args.test_buffer_months
+        filter_end = pd.to_datetime(args.train_end) + pd.DateOffset(months=total_buffer)
+
+        print(f"  Filtering data from {filter_start.strftime('%Y-%m')} to {filter_end.strftime('%Y-%m')}")
+        print(f"  (12 months before train_start + {total_buffer} months after train_end)")
         merge_all_datasets(
             data_dir=args.data_dir,
-            output_path=merged_path
+            output_path=merged_path,
+            date_start=filter_start.strftime('%Y-%m'),
+            date_end=filter_end.strftime('%Y-%m')
         )
     else:
         print("\n[STEP 2/5] Skipping merge (using existing merged data)")
@@ -126,7 +152,8 @@ def main():
         train_start=args.train_start,
         train_end=args.train_end,
         n_estimators=args.n_estimators,
-        results_dir=args.results_dir
+        results_dir=args.results_dir,
+        validation_months=args.validation_months
     )
 
     # Step 5: Construct portfolios and analyze performance

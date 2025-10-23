@@ -398,7 +398,8 @@ class OutOfSamplePredictor:
 
 
 def train_and_predict(data_path: str, train_start: str, train_end: str,
-                      n_estimators: int, results_dir: str) -> str:
+                      n_estimators: int, results_dir: str,
+                      validation_months: int = 12) -> str:
     """
     Simplified interface: Train RF model and generate predictions.
 
@@ -414,6 +415,8 @@ def train_and_predict(data_path: str, train_start: str, train_end: str,
         Number of trees
     results_dir : str
         Directory to save results
+    validation_months : int
+        Number of months for validation period (default: 12)
 
     Returns
     -------
@@ -421,7 +424,7 @@ def train_and_predict(data_path: str, train_start: str, train_end: str,
         Path to predictions file
     """
     import os
-    from data_preprocessing import create_temporal_splits
+    from preprocess import create_temporal_splits
 
     print("  Loading preprocessed data...")
     df = pd.read_csv(data_path, parse_dates=['month'])
@@ -435,7 +438,7 @@ def train_and_predict(data_path: str, train_start: str, train_end: str,
         df, date_col='month',
         train_start=train_start,
         train_end=train_end,
-        validation_months=12,
+        validation_months=validation_months,
         refit_frequency='annual'
     )
 

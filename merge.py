@@ -75,9 +75,19 @@ def load_and_prepare_macro(filepath: str) -> pd.DataFrame:
     return df
 
 
-def merge_all_datasets(data_dir: str = './data', output_path: str = './data/merged_data.csv'):
-    """Merge all datasets following GKX tutorial approach."""
+def merge_all_datasets(data_dir: str = './data', output_path: str = './data/merged_data.csv',
+                       date_start: str = None, date_end: str = None):
+    """Merge all datasets following GKX tutorial approach.
+
+    Args:
+        data_dir: Directory containing input data
+        output_path: Path to save merged data
+        date_start: Optional start date filter (YYYY-MM format)
+        date_end: Optional end date filter (YYYY-MM format)
+    """
     print("\nMerging datasets...")
+    if date_start or date_end:
+        print(f"  Filtering date range: {date_start or 'beginning'} to {date_end or 'end'}")
 
     # Load datasets
     characteristics = load_and_prepare_characteristics(
@@ -108,6 +118,17 @@ def merge_all_datasets(data_dir: str = './data', output_path: str = './data/merg
     print("  Merging with macro predictors...")
     merged = merged.merge(macro, on='month', how='inner')
     print(f"  After macro merge: {len(merged):,} rows")
+
+    # Filter by date range if specified
+    if date_start or date_end:
+        print("  Applying date filter...")
+        if date_start:
+            date_start_dt = pd.to_datetime(date_start)
+            merged = merged[merged['month'] >= date_start_dt]
+        if date_end:
+            date_end_dt = pd.to_datetime(date_end)
+            merged = merged[merged['month'] <= date_end_dt]
+        print(f"  After date filter: {len(merged):,} rows")
 
     # Add macro intercept
     merged['macro_intercept'] = 1

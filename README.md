@@ -60,12 +60,14 @@ WRDS_PASSWORD=your_password
 
 - `main.py` - Pipeline orchestration
 - `download.py` - Data download
-- `merge.py` - Dataset merging
-- `preprocess.py` - Data preprocessing
-- `data_preprocessing.py` - GKX preprocessing classes
+- `merge.py` - Dataset merging with date filtering
+- `preprocess.py` - Optimized data preprocessing with temporal splits
+- `data_preprocessing.py` - Reference class-based preprocessing implementation
 - `model_training.py` - Random Forest implementation
 - `portfolio_construction.py` - Portfolio backtesting
 - `utils.py` - Utility functions
+
+**Note**: The pipeline uses `preprocess.py` (optimized functional implementation). `data_preprocessing.py` provides an alternative class-based implementation for reference.
 
 ## Reference
 
