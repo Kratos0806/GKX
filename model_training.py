@@ -397,6 +397,66 @@ class OutOfSamplePredictor:
         return predictions_df
 
 
+def train_and_predict(data_path: str, train_start: str, train_end: str,
+                      n_estimators: int, results_dir: str) -> str:
+    """
+    Simplified interface: Train RF model and generate predictions.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to preprocessed data
+    train_start : str
+        Training start date (YYYY-MM)
+    train_end : str
+        Initial training end date (YYYY-MM)
+    n_estimators : int
+        Number of trees
+    results_dir : str
+        Directory to save results
+
+    Returns
+    -------
+    str
+        Path to predictions file
+    """
+    import os
+    from data_preprocessing import create_temporal_splits
+
+    print("  Loading preprocessed data...")
+    df = pd.read_csv(data_path, parse_dates=['month'])
+
+    # Identify feature columns (all except month, permno, ret_excess, mktcap_lag)
+    feature_cols = [col for col in df.columns
+                    if col not in ['month', 'permno', 'ret_excess', 'mktcap_lag']]
+
+    print(f"  Creating temporal splits...")
+    splits = create_temporal_splits(
+        df, date_col='month',
+        train_start=train_start,
+        train_end=train_end,
+        validation_months=12,
+        refit_frequency='annual'
+    )
+
+    print(f"  Training on {len(splits)} splits...")
+    predictor = OutOfSamplePredictor(
+        model_class=GKXRandomForest,
+        model_params={'n_estimators': n_estimators},
+        verbose=1
+    )
+
+    predictions_df = predictor.run_expanding_window(splits, feature_cols, date_col='month')
+
+    # Save predictions
+    os.makedirs(results_dir, exist_ok=True)
+    predictions_path = os.path.join(results_dir, 'predictions.csv')
+    predictions_df.to_csv(predictions_path, index=False)
+
+    print(f"  Saved predictions to {predictions_path}")
+    return predictions_path
+
+
 if __name__ == "__main__":
     # Example usage with synthetic data
     np.random.seed(42)

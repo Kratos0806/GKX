@@ -66,3 +66,15 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Environment variables (contains sensitive credentials)
+.env
+
+# Documentation and markdown files (keep only README.md)
+*.qmd
+*.md
+!README.md
+*.pdf
+
+# Results directory
+results/

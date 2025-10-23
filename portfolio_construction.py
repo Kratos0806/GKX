@@ -117,7 +117,7 @@ class PortfolioBacktest:
         portfolio_returns_df = pd.DataFrame(portfolio_returns)
 
         # If long-short, calculate spread
-        if self.long_short:
+        if self.long_short and len(portfolio_returns_df) > 0:
             long_short_returns = []
 
             for date in portfolio_returns_df[date_col].unique():
@@ -409,6 +409,55 @@ class PerformanceAnalyzer:
             comparison[strategy_name] = metrics_df.set_index('quantile')[metric]
 
         return pd.DataFrame(comparison)
+
+
+def construct_portfolios(predictions_path: str, n_quantiles: int = 10):
+    """Simplified interface: Construct portfolios from predictions."""
+    print("  Loading predictions...")
+    predictions_df = pd.read_csv(predictions_path)
+
+    # Handle both 'date' and 'month' column names
+    date_col = 'month' if 'month' in predictions_df.columns else 'date'
+    predictions_df[date_col] = pd.to_datetime(predictions_df[date_col])
+
+    # Rename to 'date' for compatibility with PortfolioBacktest
+    if date_col == 'month':
+        predictions_df = predictions_df.rename(columns={'month': 'date'})
+
+    print(f"  Constructing {n_quantiles} quantile portfolios...")
+    backtester = PortfolioBacktest(n_quantiles=n_quantiles, weighting='equal', long_short=True)
+    portfolio_returns = backtester.construct_portfolios(predictions_df)
+
+    return portfolio_returns
+
+
+def analyze_performance(portfolio_returns: pd.DataFrame, results_dir: str):
+    """Simplified interface: Analyze portfolio performance and save results."""
+    import os
+
+    if len(portfolio_returns) == 0:
+        print("  Warning: No portfolio returns to analyze!")
+        return None
+
+    print("  Calculating performance metrics...")
+    backtester = PortfolioBacktest()
+    backtester.portfolio_returns = portfolio_returns
+    metrics = backtester.calculate_performance_metrics()
+
+    # Save results
+    os.makedirs(results_dir, exist_ok=True)
+    metrics_path = os.path.join(results_dir, 'performance_metrics.csv')
+    metrics.to_csv(metrics_path, index=False)
+
+    print(f"  Saved metrics to {metrics_path}")
+
+    # Display summary
+    if 'long_short' in metrics['quantile'].values:
+        ls = metrics[metrics['quantile'] == 'long_short'].iloc[0]
+        print(f"\n  Long-Short Sharpe Ratio: {ls['sharpe_ratio']:.2f}")
+        print(f"  Long-Short Annual Return: {ls['mean_return']*12*100:.2f}%")
+
+    return metrics
 
 
 if __name__ == "__main__":
