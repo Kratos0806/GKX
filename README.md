@@ -129,20 +129,60 @@ The pipeline produces:
 
 ## Methodology
 
+This implementation **exactly follows** the steps from the tutorial at https://www.tidy-finance.org/blog/gu-kelly-xiu-replication/
+
 ### Data Transformations
-1. Cross-sectional ranking: Map characteristics to [-1, 1] interval
-2. Missing values: Replace with cross-sectional medians, then zeros
-3. Feature engineering: Create macro × characteristic interactions
+
+**Step-by-step pipeline:**
+
+1. **Cross-sectional ranking** (lines 79-96 in tutorial)
+   - Map each characteristic to [-1, 1] interval within each time period
+   - Formula: `2 * (rank - 1) / (n - 1) - 1`
+
+2. **Missing value imputation** (lines 102-121 in tutorial)
+   - First: Replace with cross-sectional median
+   - Second: Replace remaining NaN with 0
+
+3. **Industry dummies** (lines 180-181 in tutorial)
+   - One-hot encode `sic2` categorical variable → 74 dummies
+   - Uses `step_dummy(sic2, one_hot = TRUE)`
+
+4. **Macro intercept** (line 161 in tutorial)
+   - Add `macro_intercept = 1` column
+
+5. **Interaction features** (lines 178-179 in tutorial)
+   - Create: Stock characteristics × Macro predictors
+   - 94 characteristics × 9 macros (8 + intercept) = **846 interactions**
+   - **Important**: `keep_original_cols = FALSE` (drop originals, keep only interactions)
+
+6. **Final feature set**
+   - 846 interaction features + 74 industry dummies = **920 total features**
 
 ### Model Specification
 - **Random Forest**: 300 trees, tuning mtry ∈ {3,5,10,20,30,50} and min_n ∈ {5000,10000}
-- **Validation**: Rolling 12-month window
-- **Refit frequency**: Annual
+- **Validation**: Rolling 12-month window (1975-1986 initially)
+- **Refit frequency**: Annual (expanding window)
+- **Training period**: Starts 1957-1974 (18 years), expands by 1 year each refit
+- **OOS testing**: 1987-2021
 
 ### Portfolio Construction
 - Decile portfolios based on predicted returns
 - Equal-weighted and value-weighted schemes
 - Long-short (D10 - D1) zero-cost portfolios
+
+## Key Implementation Notes
+
+### Differences from Simplified Tutorial Example
+
+The tutorial provides a **simplified example** that uses a single fitted model for all years (line 409, 417). Our implementation follows the **full paper specification** and refits the model annually as described in the methodology.
+
+### Exact Replication Requirements
+
+To exactly replicate the tutorial:
+1. ✅ Use `sic2` categorical column (not pre-encoded dummies)
+2. ✅ Set `keep_original_cols = FALSE` for interactions
+3. ✅ Add `macro_intercept = 1` before creating interactions
+4. ✅ Result: Exactly 920 features (846 interactions + 74 industries)
 
 ## References
 

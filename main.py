@@ -113,12 +113,22 @@ def run_replication(
             # Define the 8 macro predictors (Welch & Goyal 2008)
             known_macros = ['dp', 'ep', 'bm', 'ntis', 'tbl', 'tms', 'dfy', 'svar']
 
-            # Identify industry dummies (SIC-based)
-            detected_industries = [col for col in df.columns if col.lower().startswith('sic')]
+            # Check for categorical industry column (sic2)
+            industry_column = None
+            detected_industries = []
+
+            if 'sic2' in df.columns:
+                # GKX tutorial uses categorical sic2 column
+                industry_column = 'sic2'
+                if verbose:
+                    print(f"    Found categorical industry column: 'sic2' (will be one-hot encoded)")
+            else:
+                # Identify pre-existing industry dummies (SIC-based)
+                detected_industries = [col for col in df.columns if col.lower().startswith('sic')]
 
             # Stock characteristics are everything else
             exclude_cols = {'date', 'DATE', 'permno', 'PERMNO', 'ret_excess',
-                          'mktcap', 'mktcap_lag'} | set(known_macros) | set(detected_industries)
+                          'mktcap', 'mktcap_lag', 'sic2'} | set(known_macros) | set(detected_industries)
             detected_chars = [col for col in df.columns if col not in exclude_cols]
 
             # Use detected values if not provided
@@ -132,7 +142,10 @@ def run_replication(
             if verbose:
                 print(f"    Detected {len(stock_characteristics)} stock characteristics")
                 print(f"    Detected {len(macro_predictors)} macro predictors")
-                print(f"    Detected {len(industry_dummies)} industry dummies")
+                if industry_column:
+                    print(f"    Found categorical industry column: '{industry_column}'")
+                else:
+                    print(f"    Detected {len(industry_dummies)} pre-existing industry dummies")
     else:
         if verbose:
             print("  No data provided. Generating synthetic data for demonstration...")
@@ -173,22 +186,42 @@ def run_replication(
     if verbose:
         print("\nStep 2: Preprocessing data...")
 
-    preprocessor = GKXPreprocessor(
-        stock_characteristics=stock_characteristics,
-        macro_predictors=macro_predictors,
-        industry_dummies=industry_dummies
-    )
+    # Determine industry column handling
+    if 'industry_column' in locals() and industry_column is not None:
+        # Use categorical industry column (will be one-hot encoded)
+        preprocessor = GKXPreprocessor(
+            stock_characteristics=stock_characteristics,
+            macro_predictors=macro_predictors,
+            industry_column=industry_column
+        )
+    else:
+        # Use pre-existing industry dummies
+        preprocessor = GKXPreprocessor(
+            stock_characteristics=stock_characteristics,
+            macro_predictors=macro_predictors,
+            industry_dummies=industry_dummies
+        )
 
     df_processed = preprocessor.fit_transform(df)
 
     feature_cols = preprocessor.get_all_features()
 
     if verbose:
-        print(f"  Total features: {len(feature_cols)}")
-        print(f"    - Stock characteristics: {len(stock_characteristics)}")
-        print(f"    - Macro predictors: {len(macro_predictors)}")
-        print(f"    - Industry dummies: {len(industry_dummies)}")
+        print(f"\n  Feature composition:")
+        print(f"    - Stock characteristics (before interaction): {len(stock_characteristics)}")
+        print(f"    - Macro predictors (before interaction): {len(macro_predictors)} + 1 intercept")
+        total_industries = len(industry_dummies) + len(preprocessor.created_industry_dummies)
+        print(f"    - Industry dummies: {total_industries}")
         print(f"    - Interaction features: {len(preprocessor.interaction_features)}")
+        print(f"    - TOTAL FEATURES: {len(feature_cols)}")
+
+        # Expected for GKX dataset: 94 chars × 9 macros + 74 industries = 920
+        if len(stock_characteristics) == 94 and len(macro_predictors) == 8:
+            expected_features = 94 * 9 + 74
+            if len(feature_cols) == expected_features:
+                print(f"    ✓ Feature count matches GKX (2020): {expected_features}")
+            else:
+                print(f"    ⚠ Expected {expected_features} features for GKX dataset, got {len(feature_cols)}")
 
     # -------------------------------------------------------------------------
     # Step 3: Create temporal splits

@@ -21,7 +21,8 @@ class GKXPreprocessor:
         self,
         stock_characteristics: List[str],
         macro_predictors: List[str],
-        industry_dummies: List[str],
+        industry_dummies: Optional[List[str]] = None,
+        industry_column: Optional[str] = None,
         date_col: str = 'date',
         return_col: str = 'ret_excess',
         stock_id_col: str = 'permno'
@@ -35,8 +36,10 @@ class GKXPreprocessor:
             Names of stock characteristic columns
         macro_predictors : List[str]
             Names of macroeconomic predictor columns
-        industry_dummies : List[str]
-            Names of industry dummy columns
+        industry_dummies : Optional[List[str]]
+            Names of industry dummy columns (if already one-hot encoded)
+        industry_column : Optional[str]
+            Name of categorical industry column (e.g., 'sic2') to be one-hot encoded
         date_col : str
             Name of date column
         return_col : str
@@ -46,13 +49,15 @@ class GKXPreprocessor:
         """
         self.stock_characteristics = stock_characteristics
         self.macro_predictors = macro_predictors
-        self.industry_dummies = industry_dummies
+        self.industry_dummies = industry_dummies or []
+        self.industry_column = industry_column
         self.date_col = date_col
         self.return_col = return_col
         self.stock_id_col = stock_id_col
 
         # Will be populated during fit
         self.interaction_features = []
+        self.created_industry_dummies = []
 
     def cross_sectional_rank(
         self,
@@ -157,12 +162,74 @@ class GKXPreprocessor:
 
         return df_imputed
 
+    def create_industry_dummies(
+        self,
+        df: pd.DataFrame,
+        industry_column: str
+    ) -> pd.DataFrame:
+        """
+        Create one-hot encoded industry dummies from categorical industry column.
+
+        Following the tutorial: step_dummy(sic2, one_hot = TRUE)
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
+        industry_column : str
+            Name of categorical industry column (e.g., 'sic2')
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with one-hot encoded industry dummies
+        """
+        df_dummies = df.copy()
+
+        if industry_column in df.columns:
+            # Create one-hot encoding
+            dummies = pd.get_dummies(df[industry_column], prefix=industry_column, dtype=int)
+
+            # Store dummy names
+            self.created_industry_dummies = dummies.columns.tolist()
+
+            # Concatenate with original dataframe
+            df_dummies = pd.concat([df_dummies, dummies], axis=1)
+
+            # Drop original categorical column
+            df_dummies = df_dummies.drop(columns=[industry_column])
+
+        return df_dummies
+
+    def add_macro_intercept(
+        self,
+        df: pd.DataFrame
+    ) -> pd.DataFrame:
+        """
+        Add macro intercept column (all ones).
+
+        Following the tutorial: mutate(macro_intercept = 1)
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input dataframe
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with macro_intercept column
+        """
+        df_intercept = df.copy()
+        df_intercept['macro_intercept'] = 1
+        return df_intercept
+
     def create_interaction_features(
         self,
         df: pd.DataFrame,
         macro_predictors: Optional[List[str]] = None,
         stock_chars: Optional[List[str]] = None,
-        keep_original_cols: bool = True
+        keep_original_cols: bool = False
     ) -> pd.DataFrame:
         """
         Create interaction terms between macro predictors and stock characteristics.
@@ -170,21 +237,23 @@ class GKXPreprocessor:
         Following the tutorial: step_interact(terms = ~ contains("characteristic"):contains("macro"),
                                               keep_original_cols = FALSE)
 
-        Note: Tutorial sets keep_original_cols = FALSE, meaning only interactions are kept.
-        However, we keep originals by default for more flexibility. Set keep_original_cols=False
-        to exactly match the tutorial.
+        IMPORTANT: The tutorial sets keep_original_cols = FALSE, meaning only interactions are kept.
+        This is the default behavior to match the GKX (2020) replication exactly.
+
+        The tutorial creates: 94 characteristics × 9 macros (8 + intercept) = 846 interactions
+        Plus 74 industry dummies = 920 total features
 
         Parameters
         ----------
         df : pd.DataFrame
             Input dataframe
         macro_predictors : Optional[List[str]]
-            Macro predictors to use (defaults to self.macro_predictors)
+            Macro predictors to use (defaults to self.macro_predictors + 'macro_intercept')
         stock_chars : Optional[List[str]]
             Stock characteristics to use (defaults to self.stock_characteristics)
         keep_original_cols : bool
             Whether to keep original columns (True) or only interactions (False)
-            Tutorial uses False, but we default to True for flexibility
+            Tutorial uses False (default) to match exact replication with 920 features
 
         Returns
         -------
@@ -192,7 +261,8 @@ class GKXPreprocessor:
             DataFrame with interaction features (and optionally original features)
         """
         if macro_predictors is None:
-            macro_predictors = self.macro_predictors
+            # Include macro_intercept in the predictors
+            macro_predictors = self.macro_predictors + ['macro_intercept']
         if stock_chars is None:
             stock_chars = self.stock_characteristics
 
@@ -203,8 +273,8 @@ class GKXPreprocessor:
         for macro in macro_predictors:
             for char in stock_chars:
                 if macro in df.columns and char in df.columns:
-                    interaction_name = f"{macro}_x_{char}"
-                    df_interact[interaction_name] = df[macro] * df[char]
+                    interaction_name = f"{char}_x_{macro}"
+                    df_interact[interaction_name] = df[char] * df[macro]
                     self.interaction_features.append(interaction_name)
 
         # If not keeping original columns, drop the characteristics and macros
@@ -220,10 +290,13 @@ class GKXPreprocessor:
         """
         Apply full preprocessing pipeline.
 
-        Steps:
+        Steps (following GKX 2020 tutorial):
         1. Cross-sectional ranking of stock characteristics
-        2. Missing value imputation
-        3. Create interaction features
+        2. Missing value imputation (median → 0)
+        3. Create industry dummies (if sic2 column provided)
+        4. Add macro intercept
+        5. Create interaction features (characteristics × macros)
+        6. Drop original characteristics and macros (keep only interactions + industry dummies)
 
         Parameters
         ----------
@@ -233,10 +306,12 @@ class GKXPreprocessor:
         Returns
         -------
         pd.DataFrame
-            Fully preprocessed dataframe
+            Fully preprocessed dataframe with exactly 920 features (for GKX dataset)
         """
+        df_processed = df.copy()
+
         print("Step 1: Cross-sectional ranking...")
-        df_processed = self.cross_sectional_rank(df, self.stock_characteristics)
+        df_processed = self.cross_sectional_rank(df_processed, self.stock_characteristics)
 
         print("Step 2: Handling missing values...")
         features_to_impute = (
@@ -246,10 +321,22 @@ class GKXPreprocessor:
         )
         df_processed = self.handle_missing_values(df_processed, features_to_impute)
 
-        print("Step 3: Creating interaction features...")
-        df_processed = self.create_interaction_features(df_processed)
+        print("Step 3: Creating industry dummies...")
+        if self.industry_column is not None:
+            df_processed = self.create_industry_dummies(df_processed, self.industry_column)
+            print(f"  Created {len(self.created_industry_dummies)} industry dummies")
 
-        print(f"Total features created: {len(self.get_all_features())}")
+        print("Step 4: Adding macro intercept...")
+        df_processed = self.add_macro_intercept(df_processed)
+
+        print("Step 5: Creating interaction features...")
+        df_processed = self.create_interaction_features(df_processed)
+        print(f"  Created {len(self.interaction_features)} interaction features")
+
+        all_features = self.get_all_features()
+        print(f"\nTotal features: {len(all_features)}")
+        print(f"  - Interaction features: {len(self.interaction_features)}")
+        print(f"  - Industry dummies: {len(self.industry_dummies) + len(self.created_industry_dummies)}")
 
         return df_processed
 
@@ -273,17 +360,21 @@ class GKXPreprocessor:
         """
         Get list of all feature names after preprocessing.
 
+        Following GKX tutorial with keep_original_cols=FALSE:
+        - Only interaction features (characteristics × macros)
+        - Plus industry dummies
+
         Returns
         -------
         List[str]
-            All feature names
+            All feature names (interactions + industry dummies)
         """
-        return (
-            self.stock_characteristics +
-            self.macro_predictors +
-            self.industry_dummies +
-            self.interaction_features
-        )
+        # With keep_original_cols=FALSE (default), we only have:
+        # - Interaction features
+        # - Industry dummies (either pre-existing or created)
+        all_industries = self.industry_dummies + self.created_industry_dummies
+
+        return self.interaction_features + all_industries
 
 
 def create_temporal_splits(
